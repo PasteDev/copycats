@@ -8,6 +8,12 @@ pluginManagement {
     }
 }
 
+def enabledPlatforms = providers.gradleProperty("enabled_platforms").orElse("neoforge").get().split(",").collect { it.trim() }
+
 include("common")
-include("fabric")
-include("neoforge")
+if (enabledPlatforms.contains("fabric")) {
+    include("fabric")
+}
+if (enabledPlatforms.contains("neoforge")) {
+    include("neoforge")
+}

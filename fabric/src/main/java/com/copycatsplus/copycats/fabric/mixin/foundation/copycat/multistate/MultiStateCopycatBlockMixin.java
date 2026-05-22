@@ -1,6 +1,5 @@
 package com.copycatsplus.copycats.fabric.mixin.foundation.copycat.multistate;
 
-import com.copycatsplus.copycats.foundation.copycat.CopycatMaterialStore;
 import com.copycatsplus.copycats.foundation.copycat.ICopycatBlock;
 import com.copycatsplus.copycats.foundation.copycat.multistate.IMultiStateCopycatBlock;
 import com.copycatsplus.copycats.foundation.copycat.multistate.IMultiStateCopycatBlockEntity;
@@ -110,13 +109,12 @@ public abstract class MultiStateCopycatBlockMixin extends Block implements IMult
     @Override
     public int getLightEmission(BlockState state, BlockGetter level, BlockPos pos) {
         if (state.getBlock() instanceof IMultiStateCopycatBlock copycatBlock) {
-            AtomicInteger light = new AtomicInteger(0);
-
-            Map<String, BlockState> materials = CopycatMaterialStore.getMaterial(level, pos).right().orElse(null);
-            if (materials == null)
+            IMultiStateCopycatBlockEntity copycatBE = copycatBlock.getCopycatBlockEntity(level, pos);
+            if (copycatBE == null)
                 return state.getLightEmission();
-            materials.forEach((key, bs) -> {
-                light.accumulateAndGet(bs.getLightEmission(), Math::max);
+            AtomicInteger light = new AtomicInteger(0);
+            copycatBE.getMaterialItemStorage().getAllMaterials().forEach(material -> {
+                light.accumulateAndGet(material.getLightEmission(level, pos), Math::max);
             });
             return light.get();
         } else {

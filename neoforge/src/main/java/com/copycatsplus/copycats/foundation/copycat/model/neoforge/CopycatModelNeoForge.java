@@ -134,10 +134,14 @@ public class CopycatModelNeoForge extends BakedModelWrapperWithData {
                     continue;
                 }
                 Vec3i inner = multiStateBlock.getVectorFromProperty(state, s.getKey());
-                boolean enableCT = !disableCTForPass;
-                if (world.getBlockEntity(pos) instanceof IMultiStateCopycatBlockEntity multiStateBE) {
+                final boolean enableCT;
+                if (disableCTForPass) {
+                    enableCT = false;
+                } else if (world.getBlockEntity(pos) instanceof IMultiStateCopycatBlockEntity multiStateBE) {
                     MaterialItemStorage.MaterialItem materialItem = multiStateBE.getMaterialItemStorage().getMaterialItem(s.getKey());
                     enableCT = materialItem != null && materialItem.enableCT();
+                } else {
+                    enableCT = true;
                 }
                 ScaledBlockAndTintGetter scaledWorld = new ScaledBlockAndTintGetterForge(s.getKey(), world, pos, inner, multiStateBlock.vectorScale(state), p -> true);
 
@@ -244,9 +248,11 @@ public class CopycatModelNeoForge extends BakedModelWrapperWithData {
                 wrappedData = ModelDataUtils.mergeData(wrappedData, VirtualRenderHelper.VIRTUAL_DATA).build();
             }
 
+            final BlockState templateState = wrappedState;
+            final ModelData templateData = wrappedData;
             List<QuadTemplate> templateQuads = quadTemplateCache.computeIfAbsent(
-                    new QuadTemplateCacheKey(model, wrappedState, wrappedData, renderType),
-                    key -> collectTemplateQuads(model, wrappedState, rand, wrappedData, renderType)
+                    new QuadTemplateCacheKey(model, templateState, templateData, renderType),
+                    key -> collectTemplateQuads(model, templateState, rand, templateData, renderType)
             );
 
             List<CopycatRenderContextNeoForge.CopycatBakedQuad> quads = new ArrayList<>(templateQuads.size());

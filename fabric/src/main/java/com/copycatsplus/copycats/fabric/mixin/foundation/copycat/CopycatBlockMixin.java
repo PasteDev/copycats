@@ -4,8 +4,9 @@ import com.copycatsplus.copycats.content.copycat.door.CopycatDoorBlock;
 import com.copycatsplus.copycats.content.copycat.pane.CopycatPaneBlock;
 import com.copycatsplus.copycats.content.copycat.sliding_door.CopycatSlidingDoorBlock;
 import com.copycatsplus.copycats.foundation.copycat.CCCopycatBlock;
-import com.copycatsplus.copycats.foundation.copycat.CopycatMaterialStore;
 import com.copycatsplus.copycats.foundation.copycat.ICopycatBlock;
+import com.copycatsplus.copycats.foundation.copycat.ICopycatBlockEntity;
+import com.copycatsplus.copycats.utility.BlockEntityUtils;
 import com.copycatsplus.copycats.content.copycat.button.CopycatButtonBlock;
 import com.copycatsplus.copycats.content.copycat.fence.CopycatFenceBlock;
 import com.copycatsplus.copycats.content.copycat.fence_gate.CopycatFenceGateBlock;
@@ -96,13 +97,9 @@ public abstract class CopycatBlockMixin extends Block implements ICopycatBlock,
 
     @Override
     public int getLightEmission(BlockState state, BlockGetter level, BlockPos pos) {
-        BlockState material = CopycatMaterialStore.getMaterial(level, pos).left().orElse(null);
-        if (material == null)
-            return state.getLightEmission();
-        Block block = material.getBlock();
-        if (block instanceof LightEmissiveBlock lightEmissiveBlock)
-            return lightEmissiveBlock.getLightEmission(material, level, pos);
-        return material.getLightEmission();
+        if (level.getBlockEntity(pos) instanceof ICopycatBlockEntity copycatBE)
+            return BlockEntityUtils.getLightEmission(copycatBE);
+        return state.getLightEmission();
     }
 
     @Override
