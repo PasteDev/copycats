@@ -117,6 +117,9 @@ public class MaterialItemStorage {
     public boolean deserialize(CompoundTag tag, HolderLookup.Provider registries) {
         AtomicBoolean anyUpdated = new AtomicBoolean(false);
         tag.getAllKeys().forEach(key -> {
+            if (!storage.containsKey(key)) {
+                return;
+            }
             MaterialItem newVersion = MaterialItem.deserialize(tag.getCompound(key), registries);
             MaterialItem oldVersion = storage.put(key, newVersion);
             if (oldVersion != null &&

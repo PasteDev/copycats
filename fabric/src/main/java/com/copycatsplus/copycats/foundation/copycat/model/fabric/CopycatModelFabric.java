@@ -123,6 +123,10 @@ public class CopycatModelFabric extends ForwardingBakedModel implements CustomPa
             remainingDataMap = new HashMap<>();
         }
         final boolean isVirtual = VirtualEmptyBlockGetter.is(blockView);
+        core.prepareForRender();
+        final boolean disableCTForPass = core.disableCTEverywhere || (isVirtual && core.disableCTOnContraptions);
+        final BlockEntity blockEntity = blockView.getBlockEntity(pos);
+        Map<QuadTemplateCacheKey, List<MutableQuadView>> quadTemplateCache = new HashMap<>();
 
         for (CopycatModelCore.ModelEntry entry : entries) {
             BlockState material = entry.materialMapper().map(state, materials.get(entry.key()));
@@ -150,7 +154,7 @@ public class CopycatModelFabric extends ForwardingBakedModel implements CustomPa
                 BlockAndTintGetter renderWorld;
                 if (state.getBlock() instanceof IMultiStateCopycatBlock multiStateBlock) {
                     Vec3i inner = multiStateBlock.getVectorFromProperty(state, entry.key());
-                    boolean enableCT = !(blockView.getBlockEntity(pos) instanceof IMultiStateCopycatBlockEntity multiStateBE) || multiStateBE.isCTEnabled();
+                    boolean enableCT = !disableCTForPass && (!(blockEntity instanceof IMultiStateCopycatBlockEntity multiStateBE) || multiStateBE.isCTEnabled());
                     ScaledBlockAndTintGetter scaledWorld = ScaledBlockAndTintGetterFabric.create(isVirtual, entry.key(), remainingData, blockView, pos, inner, multiStateBlock.vectorScale(state), p -> true);
                     renderWorld = ScaledBlockAndTintGetterFabric.create(isVirtual, entry.key(), remainingData, blockView, pos, inner, multiStateBlock.vectorScale(state),
                             targetPos -> {
@@ -159,12 +163,11 @@ public class CopycatModelFabric extends ForwardingBakedModel implements CustomPa
                             });
                     gatherOcclusionData(scaledWorld, pos, state, material, occlusionData, multiStateBlock);
                 } else if (state.getBlock() instanceof ICopycatBlock copycatBlock) {
+                    boolean enableCT = !disableCTForPass && (!(blockEntity instanceof ICopycatBlockEntity ctbe) || ctbe.isCTEnabled());
                     gatherOcclusionData(blockView, pos, state, material, occlusionData, copycatBlock);
                     renderWorld = FilteredBlockAndTintGetterFabric.create(isVirtual, remainingData, blockView, pos, t -> {
-                        BlockEntity be = blockView.getBlockEntity(pos);
-                        if (be instanceof ICopycatBlockEntity ctbe)
-                            if (!ctbe.isCTEnabled())
-                                return false;
+                        if (!enableCT)
+                            return false;
                         return copycatBlock.canConnectTexturesToward(blockView, pos, t, state);
                     });
                 } else {
@@ -178,28 +181,42 @@ public class CopycatModelFabric extends ForwardingBakedModel implements CustomPa
                 MeshBuilder meshBuilder = Objects.requireNonNull(RendererAccess.INSTANCE.getRenderer()).meshBuilder();
                 QuadEmitter emitter = meshBuilder.getEmitter();
 
-                List<MutableQuadView> quads = new ArrayList<>();
-
-                context.pushTransform(quad -> {
-                    if (entry.part() == null) {
-                        emitter.copyFrom(quad);
-                        emitter.emit();
-                    } else {
-                        MutableQuadView newQuad = IntermediateMutableQuadView.create();
-                        newQuad.copyFrom(quad);
-                        quads.add(newQuad);
-                    }
-                    return false;
-                });
                 // provide the original material to the model instead of the mapped material so that CT works and treats the mapped material as the unmapped one
                 BlockState originalMaterial = materials.get(entry.key());
                 if (originalMaterial == null)
                     originalMaterial = AllBlocks.COPYCAT_BASE.getDefaultState();
-                model.emitBlockQuads(renderWorld, originalMaterial, pos, randomSupplier, context);
-                context.popTransform();
+                List<MutableQuadView> quads = quadTemplateCache.computeIfAbsent(
+                        new QuadTemplateCacheKey(model, renderWorld, material, originalMaterial),
+                        key -> {
+                            List<MutableQuadView> templates = new ArrayList<>();
+                            context.pushTransform(quad -> {
+                                MutableQuadView newQuad = IntermediateMutableQuadView.create();
+                                newQuad.copyFrom(quad);
+                                templates.add(newQuad);
+                                return false;
+                            });
+                            model.emitBlockQuads(renderWorld, originalMaterial, pos, randomSupplier, context);
+                            context.popTransform();
+                            return templates;
+                        }
+                );
 
-                CopycatRenderContextFabric copycatContext = new CopycatRenderContextFabric(quads, emitter, entry.key());
-                entry.part().emitCopycatQuads(entry.key(), state, copycatContext, material);
+                if (entry.part() == null) {
+                    for (MutableQuadView quad : quads) {
+                        emitter.copyFrom(quad);
+                        emitter.emit();
+                    }
+                } else {
+                    List<MutableQuadView> copiedQuads = new ArrayList<>(quads.size());
+                    for (MutableQuadView quad : quads) {
+                        MutableQuadView newQuad = IntermediateMutableQuadView.create();
+                        newQuad.copyFrom(quad);
+                        copiedQuads.add(newQuad);
+                    }
+
+                    CopycatRenderContextFabric copycatContext = new CopycatRenderContextFabric(copiedQuads, emitter, entry.key());
+                    entry.part().emitCopycatQuads(entry.key(), state, copycatContext, material);
+                }
 
                 context.pushTransform(quad -> {
                     if (occlusionData.isOccluded(quad.cullFace()))
@@ -307,6 +324,9 @@ public class CopycatModelFabric extends ForwardingBakedModel implements CustomPa
         public boolean isOccluded(Direction face) {
             return face != null && occluded[face.get3DDataValue()];
         }
+    }
+
+    private record QuadTemplateCacheKey(BakedModel model, BlockAndTintGetter world, BlockState mappedMaterial, BlockState originalMaterial) {
     }
 
     public record MaterialFixer(RenderMaterial materialDefault) implements RenderContext.QuadTransform {

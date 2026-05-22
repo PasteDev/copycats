@@ -23,12 +23,13 @@ public class BlockEntityUtils {
         if (level != null) {
             if (level.isClientSide()) {
                 requestModelDataUpdate(blockEntity);
+                return;
             } else {
                 blockEntity.setChanged();
+                BlockState state = blockEntity.getBlockState();
+                level.sendBlockUpdated(blockEntity.getBlockPos(), state, state, 16);
+                updateLight(blockEntity);
             }
-            BlockState state = blockEntity.getBlockState();
-            level.sendBlockUpdated(blockEntity.getBlockPos(), state, state, 16);
-            updateLight(blockEntity);
         }
     }
 

@@ -7,7 +7,8 @@ useRenderDoc = useRenderDoc.toBoolean() & !ext.ci
 def renderdocPath = (project.findProperty('renderdocDir') ?: "C:/Program Files/RenderDoc").toString()
 def renderdocCmdExe = new File(renderdocPath, "renderdoccmd.exe")
 if (useRenderDoc && !renderdocCmdExe.exists()) {
-    throw new GradleException("RenderDoc not found at ${renderdocCmdExe} — please set -PrenderdocDir correctly")
+    logger.warn("RenderDoc not found at ${renderdocCmdExe} — disabling RenderDoc. Install RenderDoc or set -PrenderdocDir to enable it.")
+    useRenderDoc = false
 }
 
 loom {

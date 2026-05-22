@@ -9,6 +9,7 @@ import com.copycatsplus.copycats.foundation.copycat.model.ScaledBlockAndTintGett
 import com.copycatsplus.copycats.foundation.copycat.model.assembly.neoforge.CopycatRenderContextNeoForge;
 import com.copycatsplus.copycats.foundation.copycat.multistate.IMultiStateCopycatBlock;
 import com.copycatsplus.copycats.foundation.copycat.multistate.IMultiStateCopycatBlockEntity;
+import com.copycatsplus.copycats.foundation.copycat.multistate.MaterialItemStorage;
 import com.copycatsplus.copycats.utility.neoforge.ModelDataUtils;
 import com.simibubi.create.AllBlocks;
 import com.simibubi.create.foundation.model.BakedModelWrapperWithData;
@@ -103,9 +104,12 @@ public class CopycatModelNeoForge extends BakedModelWrapperWithData {
     @Override
     public ModelData.Builder gatherModelData(ModelData.Builder builder, BlockAndTintGetter world, BlockPos pos, BlockState state,
                                              ModelData blockEntityData) {
+        core.prepareForRender();
         if (!(originalModel instanceof BakedModelWrapperWithData)) {
             ModelDataUtils.copyModelData(originalModel.getModelData(world, pos, state, blockEntityData), builder);
         }
+        final boolean isVirtual = VirtualRenderHelper.isVirtual(blockEntityData);
+        final boolean disableCTForPass = core.disableCTEverywhere || (isVirtual && core.disableCTOnContraptions);
 
         Map<String, BlockState> materials = getMaterials(blockEntityData);
         if (materials.isEmpty()) {
@@ -122,15 +126,23 @@ public class CopycatModelNeoForge extends BakedModelWrapperWithData {
             return builder;
 
         if (copycatBlock instanceof IMultiStateCopycatBlock multiStateBlock) {
+            Set<String> validProperties = multiStateBlock.storageProperties();
             Map<String, ModelData> wrappedDataMap = new HashMap<>();
             Map<String, OcclusionData> occlusionMap = new HashMap<>();
             for (Map.Entry<String, BlockState> s : materials.entrySet()) {
+                if (!validProperties.contains(s.getKey())) {
+                    continue;
+                }
                 Vec3i inner = multiStateBlock.getVectorFromProperty(state, s.getKey());
-                boolean enableCT = !(world.getBlockEntity(pos) instanceof IMultiStateCopycatBlockEntity multiStateBE) || multiStateBE.getMaterialItemStorage().getMaterialItem(s.getKey()).enableCT();
+                boolean enableCT = !disableCTForPass;
+                if (world.getBlockEntity(pos) instanceof IMultiStateCopycatBlockEntity multiStateBE) {
+                    MaterialItemStorage.MaterialItem materialItem = multiStateBE.getMaterialItemStorage().getMaterialItem(s.getKey());
+                    enableCT = materialItem != null && materialItem.enableCT();
+                }
                 ScaledBlockAndTintGetter scaledWorld = new ScaledBlockAndTintGetterForge(s.getKey(), world, pos, inner, multiStateBlock.vectorScale(state), p -> true);
 
                 OcclusionData occlusionData = new OcclusionData();
-                if (!VirtualRenderHelper.isVirtual(blockEntityData))
+                if (!isVirtual)
                     gatherOcclusionData(scaledWorld, pos, state, s.getValue(), occlusionData, copycatBlock);
                 occlusionMap.put(s.getKey(), occlusionData);
 
@@ -147,9 +159,10 @@ public class CopycatModelNeoForge extends BakedModelWrapperWithData {
         } else {
             BlockState material = materials.get(MATERIAL_KEY);
             if (material == null) return builder;
+            boolean enableCT = !disableCTForPass && (!(world.getBlockEntity(pos) instanceof ICopycatBlockEntity copycatBE) || copycatBE.isCTEnabled());
 
             OcclusionData occlusionData = new OcclusionData();
-            if (!VirtualRenderHelper.isVirtual(blockEntityData))
+            if (!isVirtual)
                 gatherOcclusionData(world, pos, state, material, occlusionData, copycatBlock);
             Map<String, OcclusionData> occlusionMap = Map.of(
                     MATERIAL_KEY,
@@ -159,9 +172,7 @@ public class CopycatModelNeoForge extends BakedModelWrapperWithData {
 
             FilteredBlockAndTintGetter filteredWorld = new FilteredBlockAndTintGetterForge(world,
                     targetPos -> {
-                        BlockEntity be = world.getBlockEntity(pos);
-                        if (be instanceof ICopycatBlockEntity copycatBE)
-                            if (!copycatBE.isCTEnabled()) return false;
+                        if (!enableCT) return false;
                         return copycatBlock.canConnectTexturesToward(world, pos, targetPos, state);
                     });
             Map<String, ModelData> wrappedDataMap = Map.of(
@@ -198,6 +209,7 @@ public class CopycatModelNeoForge extends BakedModelWrapperWithData {
         prepareModelCore(state, rand, data);
 
         List<CopycatRenderContextNeoForge.CopycatBakedQuad> allQuads = new ArrayList<>();
+        Map<QuadTemplateCacheKey, List<QuadTemplate>> quadTemplateCache = new HashMap<>();
         Map<String, BlockState> materials = getMaterials(data);
         Map<String, OcclusionData> occlusionDataMap = getOcclusion(data);
         Map<String, ModelData> wrappedDataMap = getWrappedData(data);
@@ -232,16 +244,14 @@ public class CopycatModelNeoForge extends BakedModelWrapperWithData {
                 wrappedData = ModelDataUtils.mergeData(wrappedData, VirtualRenderHelper.VIRTUAL_DATA).build();
             }
 
-            List<CopycatRenderContextNeoForge.CopycatBakedQuad> quads = new ArrayList<>();
-            for (Direction side : Iterate.directions) {
-                List<BakedQuad> templateQuads = model.getQuads(wrappedState, side, rand, wrappedData, renderType);
-                for (BakedQuad templateQuad : templateQuads) {
-                    quads.add(new CopycatRenderContextNeoForge.CopycatBakedQuad(templateQuad, side, entry.key()));
-                }
-            }
-            List<BakedQuad> templateQuads = model.getQuads(wrappedState, null, rand, wrappedData, renderType);
-            for (BakedQuad templateQuad : templateQuads) {
-                quads.add(new CopycatRenderContextNeoForge.CopycatBakedQuad(templateQuad, null, entry.key()));
+            List<QuadTemplate> templateQuads = quadTemplateCache.computeIfAbsent(
+                    new QuadTemplateCacheKey(model, wrappedState, wrappedData, renderType),
+                    key -> collectTemplateQuads(model, wrappedState, rand, wrappedData, renderType)
+            );
+
+            List<CopycatRenderContextNeoForge.CopycatBakedQuad> quads = new ArrayList<>(templateQuads.size());
+            for (QuadTemplate templateQuad : templateQuads) {
+                quads.add(new CopycatRenderContextNeoForge.CopycatBakedQuad(templateQuad.quad(), templateQuad.cullFace(), entry.key()));
             }
 
             List<CopycatRenderContextNeoForge.CopycatBakedQuad> croppedQuads = getCroppedQuads(entry, state, quads, material);
@@ -260,6 +270,19 @@ public class CopycatModelNeoForge extends BakedModelWrapperWithData {
         }
 
         return allQuads;
+    }
+
+    private List<QuadTemplate> collectTemplateQuads(BakedModel model, BlockState wrappedState, RandomSource rand, ModelData wrappedData, RenderType renderType) {
+        List<QuadTemplate> templates = new ArrayList<>();
+        for (Direction side : Iterate.directions) {
+            for (BakedQuad templateQuad : model.getQuads(wrappedState, side, rand, wrappedData, renderType)) {
+                templates.add(new QuadTemplate(templateQuad, side));
+            }
+        }
+        for (BakedQuad templateQuad : model.getQuads(wrappedState, null, rand, wrappedData, renderType)) {
+            templates.add(new QuadTemplate(templateQuad, null));
+        }
+        return templates;
     }
 
     @Override
@@ -352,6 +375,12 @@ public class CopycatModelNeoForge extends BakedModelWrapperWithData {
         public boolean isOccluded(Direction face) {
             return face != null && occluded[face.get3DDataValue()];
         }
+    }
+
+    private record QuadTemplateCacheKey(BakedModel model, BlockState state, ModelData data, RenderType renderType) {
+    }
+
+    private record QuadTemplate(BakedQuad quad, Direction cullFace) {
     }
 
     @FunctionalInterface

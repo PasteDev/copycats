@@ -38,6 +38,8 @@ public abstract class CopycatModelCore implements CopycatModelPart {
      * Whether to colorize copycat base models.
      */
     public boolean colorize = false;
+    public boolean disableCTOnContraptions = true;
+    public boolean disableCTEverywhere = false;
 
     /**
      * Register all models required to render this copycat.
@@ -90,6 +92,8 @@ public abstract class CopycatModelCore implements CopycatModelPart {
     public void prepareForRender() {
         enhanced = CCConfigs.client().useEnhancedModels.get();
         colorize = CCConfigs.client().colorizeMultiStates.get();
+        disableCTOnContraptions = CCConfigs.client().disableCTOnContraptions.get();
+        disableCTEverywhere = CCConfigs.client().disableCTEverywhere.get();
     }
 
     /**
